@@ -1,0 +1,302 @@
+---
+title: "BART"
+author: "Sammie Liang"
+date: "July 15, 2017"
+output: html_document
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE, autodep=TRUE, cache.comments=TRUE)
+```
+
+```{r}
+library(fields)
+library(png)
+```
+
+
+Questions to Answer/Goals
+===
+
+- **1.** Which day of the week is the busiest? 
+- **2.** Which time of the day is busiest? 
+- **3.** Which BART station is the busiest? 
+
+Data Preparation
+===
+
+- First, read in the data for both the "station_info.csv", which contains descriptions and full names of each of the stations, as well as "date-hour-soo-dest-2017.csv", which contains BART travel data in the first five months of 2017. 
+
+```{r}
+
+#Both datasets were taken from https://www.kaggle.com/saulfuh/bart-ridership
+
+stationInfo = read.csv("station_info.csv") 
+bartTravel = read.csv("date-hour-soo-dest-2017.csv")
+```
+
+- The day, month, and year of the bartTravel dataset need to be formatted correctly. In addition, the encoding of name of the Abbreviation variable was not ideal, so I just created a new variable name. There was a discrepancy between the abbreviation for Warm Springs in the BART data and the station data, so I updated the station data to match that of the BART data.
+
+```{r}
+bartTravel$Day = as.factor(weekdays(as.Date(bartTravel$DateTime, format = "%Y-%m-%d")))
+bartTravel$Month = as.factor(months(as.Date(bartTravel$DateTime, format = "%Y-%m-%d")))
+bartTravel$Hour = as.factor(substring(bartTravel$DateTime, 12, 16))
+stationInfo$Abb = stationInfo$ï..Abbreviation
+stationInfo$ï..Abbreviation = NULL
+levels(stationInfo$Abb)[levels(stationInfo$Abb) == "WARM"] = "WSPR"
+```
+
+```{r}
+names(bartTravel)
+names(stationInfo)
+```
+
+Question 1: Which day of the week is busiest? 
+===
+
+**1.1 Organizing Data**
+
+- I will compute the busiest day of the week based on the sum of both destiation and origin data. I split the 'bartTravel' data according to days of the week, the origin, as well as destination separately.  
+
+```{r}
+days = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+ridesByDay = split(bartTravel, f=bartTravel$Day)
+dayRides = vector(length=length(days))
+
+for (i in 1:length(days))
+{
+  dayData = subset(ridesByDay, names(ridesByDay) == days[i])[[1]]
+  dayRides[i] = sum(dayData$Throughput)
+}
+names(dayRides) = days
+dayRides
+```
+
+**1.2 Visualiziation**
+
+```{r}
+barplot(dayRides, names.arg=substring(names(dayRides),1,3), col="light blue", ylim=c(0,max(dayRides)*1.1), main="Number of Total Rides Per Weekday", ylab="Total Rides")
+```
+
+**1.3 Conclusion**
+
+- From the visualization, we conclude that Wednesday is the busiest day of the week, with Sunday being the least busy. Overall, the weekdays are much more heavily populated than the weekends, which makes sense, given people ride BART to school and to work on the weekdays. 
+
+Question 2: Which time of day is busiest? 
+===
+
+**2.1 Organizing Data** 
+
+- We can take it a step further, and break down what the busiest hour of the day to ride BART is. 
+
+```{r}
+hours = levels(bartTravel$Hour)
+dayRidesByHour = matrix(nrow = length(days), ncol = length(hours))
+for (i in 1:length(days))
+{
+  dayData = subset(ridesByDay, names(ridesByDay) == days[i])[[1]]
+  for (j in 1:length(hours))
+  {
+    dayRidesByHour[i,j] = sum(dayData$Throughput[dayData$Hour == hours[j]])
+  }
+}
+rownames(dayRidesByHour) = days
+colnames(dayRidesByHour) = hours
+dayRidesByHour
+
+ridesByHour = colSums(dayRidesByHour)
+names(ridesByHour) = hours
+```
+
+**2.2 Visualization** 
+
+```{r}
+par(mar=c(5,5,2,0.5))
+barplot(ridesByHour, names.arg=names(ridesByHour), col="light blue", ylim=c(0,max(ridesByHour))*1.1, main="Number of Rides by Hour", las=2)
+mtext(side=2, text = "Total Rides", line=4)
+mtext(side=1, text="Time", line=4)
+```
+
+**2.3 Conclusion**
+
+- The bar graph is bimodal, with modes around 7AM and 5-6PM, and it is skewed left. This makes sense intuitively because 7AM is when a lot of people head to school and work and 5-6PM is when most people leave work. The left skew is due to the fact not many people transit in the middle of the night, especially around midnight to 4AM. 
+
+**2.4 Another Visualization** 
+
+- I wanted to explore a combined visualization of the days of the week with the hours of the day. 
+
+```{r}
+par(mar=c(5,5,1,5))
+barplot(as.matrix(as.data.frame(t(dayRidesByHour))), col=rainbow(24), names.arg=substring(rownames(dayRidesByHour),1,3), ylim=c(0,max(rowSums(dayRidesByHour))*1.1), main="Number of Total Rides Per Weekday By Hour")
+legend("right", legend=rev(colnames(dayRidesByHour)), col=rev(rainbow(24)),pch=15, xpd=TRUE, cex=0.55, inset=-0.06)
+mtext(side=2, text = "Total Rides", line=3)
+mtext(side=1, text="Time", line=3)
+```
+
+- Just visually, the ratio of the popularity of the hours to the overall busyness seem pretty proportional. 
+
+Question 3: Which BART station is the busiest? 
+===
+
+**3.1 Organizing Data**
+
+- I split the day according to origin station data and destination station data to make the data easier to deal with. 
+
+```{r}
+allUniqueStations = levels(bartTravel$Origin)
+
+stationData.arr = split(bartTravel, bartTravel$Destination)
+stationData.depart = split(bartTravel, bartTravel$Origin)
+
+ridesByStation.arr = vector(length=length(allUniqueStations))
+ridesByStation.depart = vector(length=length(allUniqueStations))
+for (i in 1:length(allUniqueStations))
+{
+  arr = stationData.arr[[i]]
+  depart = stationData.depart[[i]]
+  ridesByStation.arr[i] = sum(arr$Throughput)
+  ridesByStation.depart[i] = sum(depart$Throughput)
+}
+
+names(ridesByStation.arr) = allUniqueStations
+names(ridesByStation.depart) = allUniqueStations
+
+stationData = ridesByStation.arr + ridesByStation.depart
+names(stationData) = allUniqueStations
+```
+
+```{r}
+totalRidesByStation = sort(stationData, decreasing=TRUE)
+fiveMostPopularStations = vector(length=5)
+
+for (i in 1:5)
+{
+  fiveMostPopularStations[i] = as.character(stationInfo$Name[stationInfo$Abb == names(totalRidesByStation)[i]])
+}
+
+fiveMostPopularStations
+```
+
+**3.2 Visualization**
+
+```{r}
+par(mar=c(5,5,2,0.5))
+barplot(stationData, names.arg=names(stationData), col="light blue", ylim=c(0,max(stationData))*1.1, main="Number of Rides by Station", las=2)
+mtext(side=2, text = "Total Rides", line=4)
+mtext(side=1, text="Station", line=4)
+```
+
+```{r}
+par(mar=c(5,5,2,0.5))
+stationData.arr.depart = cbind(ridesByStation.arr, ridesByStation.depart)
+colnames(stationData.arr.depart) = c("Arrival", "Departure")
+
+barplot(as.matrix(as.data.frame(t(stationData.arr.depart))), col=cm.colors(2), names.arg=rownames(stationData.arr.depart), ylim=c(0,max(rowSums(stationData.arr.depart))*1.2), main="Number of Rides by Station", las=2)
+mtext(side=2, text = "Total Rides", line=4)
+mtext(side=1, text="Station", line=4)
+legend("topright", legend=rev(colnames(stationData.arr.depart)), col=rev(cm.colors(2)),pch=15, xpd=TRUE)
+```
+
+```{r}
+ratio.depart = (ridesByStation.depart)/(ridesByStation.arr + ridesByStation.depart)
+ratio.arr = (ridesByStation.arr)/(ridesByStation.arr + ridesByStation.depart)
+sum(ratio.depart > 0.55)
+sum(ratio.arr > 0.55)
+```
+
+**3.3 Conclusions**
+
+- The five most popular stations are Embarcadero (EMBR), Montgomery Street (MONT), Powell Street (POWL), Civic Center (CIVC), and 12th Street (12TH). Looking at the graphical visualization, the four most popular stations are significantly dense so than the rest of the stations. In addition, within each station, there doesn't seem to be a big difference between the arrival rides and the departure rides, considering that neither one are greater than the other by at least 55%.
+
+**3.4 Another Visualization**
+
+```{r}
+dayRidesByStation = matrix(nrow=length(allUniqueStations), ncol=length(days))
+for (i in 1:length(allUniqueStations))
+{
+  station.arr = stationData.arr[[i]]
+  station.depart = stationData.depart[[i]]
+  
+  for (j in 1:length(days))
+  {
+      dayRidesByStation[i,j] = sum(station.arr$Throughput[station.arr$Day == days[j]])
+      dayRidesByStation[i,j] = sum(station.depart$Throughput[station.depart$Day == days[j]])
+  }
+}
+
+rownames(dayRidesByStation) = allUniqueStations
+colnames(dayRidesByStation) = days
+```
+
+```{r}
+barplot(as.matrix(as.data.frame(dayRidesByStation)), col=rainbow(46), names.arg=substring(colnames(dayRidesByStation),1,3), ylim=c(0,max(colSums(dayRidesByStation))*1.1), main="Number of Arrival Rides Per Weekday By Station")
+legend("right", legend=rev(rownames(dayRidesByStation)), col=rev(rainbow(46)),pch=15, xpd=TRUE, cex=0.41, inset=-0.05)
+```
+
+- This visualization showing the popularity of each day of the week partitioned by each station is fairly parallel to the hour-partitioned graph in 2.4. Each station's daily density is proportional with the daily total rides. The one exception is Powell during the weekends. Whereas all of the other stations's total rides are reduced significantly, Powell's does not deviate quite as much.
+
+Visualizing in Zones
+===
+
+- The plot by station is difficult to visualize, so I split the stations according to the zones defined by BART. Since the zones are broken up spatially, it is likely that if a station is popular, the stations around it are popular as well. 
+
+```{r}
+#Image taken from the BART website
+zone_img = download.file("http://www.bart.gov/sites/default/files/images/basic_page/zone_map.png", "bart_zones.png", mode="wb")
+zone_img = readPNG("bart_zones.png")
+plot(0:100,0:100,type="n", ann=FALSE, axes=FALSE)
+rasterImage(zone_img, 0, 0, 60, 100)
+```
+
+**Organizing Data**
+
+```{r}
+zone1 = c("WOAK","MCAR","19TH","12TH","LAKE","FTVL","COLS", "OAKL")
+zone2c = c("PITT","NCON","CONC","PHIL","WCRK","LAFY","ORIN","ROCK")
+zone2r = c("RICH","DELN","PLZA","NBRK","DBRK","ASHB")
+zone3 = c("SANL","BAYF","CAST","WDUB","DUBL","HAYW","SHAY","UCTY","FRMT", "WSPR")
+zone4 = c("EMBR","MONT", "POWL","CIVC","16TH", "24TH","GLEN","BALB")
+zone5 = c("DALY","COLM","SSAN","SBRN","MLBR", "SFIA")
+
+zones = vector(mode="list", length=length(6))
+zones[[1]] = zone1
+zones[[2]] = zone2c
+zones[[3]] = zone2r
+zones[[4]] = zone3
+zones[[5]] = zone4
+zones[[6]] = zone5
+
+zones.dest = matrix(nrow=length(zones), ncol=length(days))
+
+for (i in 1:length(zones))
+{
+    zones.dest[i,] = colSums(dayRidesByStation[(rownames(dayRidesByStation) %in% zones[[i]]),])
+}
+
+rownames(zones.dest) = c("Zone 1", "Zone 2c", "Zone 2r", "Zone 3", "Zone 4", "Zone 5")
+colnames(zones.dest) = days
+```
+
+- Just briefly scanning the zones, the four most popular stations that were calculated before are within the same zone, more specifically the San Francisco area, which makes a lot of intuitive sense. 
+
+**Visualization**
+
+```{r}
+rotate90 = function(a) { t(a[nrow(a):1,]) }
+fields::image.plot(rotate90(zones.dest), col = heat.colors(50),xaxt="n", yaxt="n", main="Heatmap of Zones by Total Rides Per Weekday")
+image(rotate90(zones.dest), col=heat.colors(50),axes=FALSE,add=TRUE)
+axis(2, at=seq(0,1,length.out=length(rownames(zones.dest))), labels=rev(paste(rownames(zones.dest))), las=2)
+axis(1, at=seq(0,1,length.out=length(substring(colnames(zones.dest),1,3))), labels=substring(colnames(zones.dest),1,3))
+
+par(mar=c(5,5,2,0.5))
+barplot(as.matrix(as.data.frame(zones.dest)), col=rainbow(6), names.arg=substring(colnames(zones.dest),1,3), ylim=c(0,max(colSums(zones.dest))*1.1), main="Number of Total Rides Per Weekday By Zones", border=NA)
+mtext(side=2, text = "Total Rides", line=3)
+mtext(side=1, text="Day of the Week", line=3)
+legend("topright", legend=rev(rownames(zones.dest)), col=rev(rainbow(6)),pch=15, xpd=TRUE, cex=0.7)
+```
+
+**Conclusions** 
+
+From the stacked bar plot, it is evident that the two most popular zones are 4 and 1, which are the San Francisco area and the downtown Oakland area respectively. The heat map visually shows how significant the difference between the San Francisco zone and all of the other zones is. It also shows that the best time to catch the BART to San Francisco would be Sunday.
+
